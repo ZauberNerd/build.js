@@ -11,3 +11,26 @@ distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
 WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 License for the specific language governing permissions and limitations under
 the License.
+
+---
+CleanCSS: clean-css/.*
+https://github.com/GoalSmashers/clean-css
+Copyright Jakub Pawlowicz <jakub@goalsmashers.com> (http://twitter.com/GoalSmashers)
+MIT License clean-css/LICENSE
+
+---
+JSLint: JSLint/.*
+https://github.com/douglascrockford/JSLint
+Copyright (c) 2002 Douglas Crockford  (www.JSLint.com)
+
+---
+html-minifier: html-minifier/.*
+https://github.com/kangax/html-minifier
+Copyright Juriy Zaytsev <kangax@gmail.com> (http://perfectionkills.com)
+MIT License html-minifier/src/license.txt
+
+---
+UglifyJS: UglifyJS/.*
+https://github.com/mishoo/UglifyJS
+Copyright 2010 (c) Mihai Bazon <mihai.bazon@gmail.com>
+BSD License UglifyJS/Readme.org
