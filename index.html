@@ -1,0 +1,590 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>build.js</title>
+  <style>
+    article,aside,details,figcaption,figure,footer,header,hgroup,nav,section{display:block}html{font-size:100%;overflow-y:scroll;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;width:100%;height:100%}body{margin:0;font-size:13px;line-height:1.231}body,button,input,select,textarea{font-family:sans-serif;color:#222}::-moz-selection{background:#fe57a1;color:#fff;text-shadow:none}::selection{background:#fe57a1;color:#fff;text-shadow:none}a{color:#00e}a:visited{color:#551a8b}a:hover{color:#06e}a:focus{outline:thin dotted}a:hover,a:active{outline:0}pre,code,kbd,samp{font-family:monospace,serif;_font-family:'courier new',monospace;font-size:1em}pre{white-space:pre;white-space:pre-wrap;word-wrap:break-word}ul,ol{margin:1em 0;padding:0 0 0 40px}dd{margin:0 0 0 40px}nav ul,nav ol{list-style:none;list-style-image:none;margin:0;padding:0}.clearfix:before,.clearfix:after{content:"";display:table}.clearfix:after{clear:both}.clearfix{zoom:1}
+    body { width: 80%;  margin: 0 auto; }
+    .dropping { box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.3); }
+    .notice-drag, .notice-win { display: none; }
+    #filesholder { padding-bottom: 30px; }
+    .file {
+      margin: 2px 0;
+      line-height: 18px;
+      font-size: 16px;
+      padding: 4px;
+      background-color: #ccc;
+      border: 2px solid #ccc;
+    }
+    .file .code { display: none; }
+    .file .code:target { display: block; }
+    .file .sourcecode, .file .compressedcode { width: 50%; float: left; max-height: 500px; overflow-y: auto; }
+    .lint { display: none; }
+    .js-file .lint { display: inline; }
+    [draggable] { -moz-user-select: none; -khtml-user-select: none; -webkit-user-select: none; user-select: none: }
+    .over { border: 2px dashed #666; background-color: #ddd; }
+    .showlintreport { float: right; display: block; margin-left: 10px; }
+    .lintreport { display: none; }
+    .lintreport:target { display: block; }
+    .concat .fileinfo { display: none; }
+    #info { position: fixed; bottom: 0; left: 0; background-color: rgba(255, 255, 255, .5); width: 100%; background-color: rgba(220, 220, 220, .9); padding: 2px 20px; }
+    #info p { margin: 0; }
+    #about { display: none; }
+    #about:target { display: block; }
+    .right { float: right; }
+  </style>
+</head>
+<body>
+  <h1>pure js-based build tool</h1>
+  <section>
+    <h1>Drop any files on this page (.css || .js || .html)</h1>
+    <p>Or select an entire folder using the cool new <a href="http://www.htmlfivewow.com/slide18" title="i recently testet this with an 9.2GB/38.000 files directory without crashing">&lt;input type="file" directory&gt;</a>: 
+    <input type="file" id="directoryinput" directory webkitdirectory mozdirectory></p>
+    <p class="notice-drag">Drag out the links to your local filesystem, their name will be changed from 'yourfilename.css||js||html' to 'yourfilename.min.css||js||html'.</p>
+    <p class="notice-drag">
+      Move the items around to specify the order in which they should be concatenated. <br>
+      <span class="notice-win"><strong>Note: </strong>If you are on windows, you had to hold the [ALT]-Key to drag the items around. (fix <a href="http://code.google.com/p/chromium/issues/detail?id=55071">that bug</a>, Google!)</span> <br>
+      If you're done with that, press <button id="concat">concatenate</button> to get a single file.
+    </p>
+    <ul id="filesholder"></ul>
+  </section>
+  <section id="info">
+    <p><a href="#about" class="opener">About</a></p>
+    <div id="about">
+      <h1>About</h1>
+      <p>warning: this is an experimental proof-of-concept, so do not use it in production</p>
+      <ul>
+        <li>Based on the ideas in this <a href="https://github.com/paulirish/html5-boilerplate/issues/523">comment</a></li>
+        <li>I've used <a href="https://github.com/substack/node-browserify">browserify</a> to pack the <a href="https://github.com/mishoo/UglifyJS">UglifyJS</a>-Scripts into one single file which can run in the browser</li>
+        <li>i've changed the <a href="https://github.com/kangax/html-minifier">html minifier</a> to provide a callback-function to compress inline scripts & styles</li>
+        <li>included Douglas Crockfords <a href="https://github.com/douglascrockford/JSLint">JSLint</a></li>
+        <li>have a look at the source, the only files i include, are those who are referenced in the <a href="http://www.html5rocks.com/en/tutorials/workers/basics/#toc-inlineworkers">inline web-worker</a> via importScripts(), by removing the '.min' from the filename, you could see the unminfied source</li>
+        <li>vote for <a href="http://code.google.com/p/chromium/issues/detail?id=55071">this bug</a> (log in with your google account and press the star)</li>
+        <li>todo: much more work, optimizations, ui-stuff</li>
+		<li><a href="https://github.com/danlucraft/git.js">git.js</a>?, <a href="http://en.wikipedia.org/wiki/Web-based_SSH">Web-based SSH</a>?</li>
+		<li><a href="http://www.html5rocks.com/en/tutorials/file/filesystem/">HTML5 Filesystem</a></li>
+      </ul>
+      <p><a href="mailto:contact@zaubernerd.de">contact@zaubernerd.de</a></p>
+    </div>
+  </section>
+<script id="worker" type="javascript/worker">
+self.onmessage = function (e) {
+  var data = e.data,
+    type = data.type,
+    content = data.content,
+    options = data.options || {},
+    css_minified,
+    js_result,
+    html_lint,
+    html_minified,
+    output;
+
+  options.url = data.url;
+
+  if (type === 'css') {
+    css_minified = self.minify_style(content, options);
+    self.postMessage({ compressed: css_minified });
+  } else if (type === 'js') {
+    js_result = self.minify_script(content, options);
+    self.postMessage({ compressed: js_result.uglify_compressed, lintreport: js_result.jslintreport });
+  } else if (type === 'html') {
+    output = self.minify_html(content, options);
+    self.postMessage({ compressed: output.html_minified, lintreport: output.html_lint });
+  }
+};
+
+self.minify_script = function (content, options) {
+  var ast,
+    jslintreport;
+  importScripts(options.url + 'UglifyJS/lib/uglify.min.js');
+  if (!!options.jslint) {
+    importScripts(options.url + 'JSLint/jslint.min.js');
+    JSLINT(content, options.jslint);
+    jslintreport = JSLINT.report(true);
+  }
+  uglify = require("uglify-js");
+  ast = uglify.parser.parse(content, options.strict_semicolons);
+  ast = uglify.uglify.ast_mangle(ast, options.mangle_options);
+  ast = uglify.uglify.ast_squeeze(ast, options.squeeze_options);
+  return {
+    uglify_compressed: uglify.uglify.gen_code(ast, options.gen_options),
+    jslintreport: jslintreport
+  };
+};
+
+self.minify_style = function (css, options) {
+  importScripts(options.url + 'clean-css/lib/clean.min.js');
+  return CleanCSS.process(css);
+};
+
+self.minify_html = function (content, options) {
+  importScripts(options.url + 'html-minifier/src/htmlparser.min.js', options.url + 'html-minifier/src/htmlminifier.min.js');
+  if (options.lint) {
+    importScripts(options.url + 'html-minifier/src/htmllint.min.js');
+    options.lint = new HTMLLint();
+  }
+  options.handleStyle = (function (options) {
+    return function (css) {
+      return self.minify_style(css, options);
+    };
+  }(options));
+  options.handleScript = (function (options) {
+    return function (js) {
+      var script = self.minify_script(js, options);
+      self.postMessage({ lintreport: script.jslintreport });
+      return script.uglify_compressed;
+    };
+  }(options));
+  return {
+    html_minified: minify(content, options),
+    html_lint: options.lint ? options.lint.populate() : false
+  };
+};
+</script>
+<script>
+(function (window) {
+  'use strict';
+  var document = window.document,
+    base_url = document.baseURI.substr(0, document.baseURI.lastIndexOf('/') + 1),
+    FileReader = window.FileReader,
+    Worker = window.Worker,
+    BlobBuilder = window.BlobBuilder || window.WebKitBlobBuilder || window.MozBlobBuilder,
+    URL = window.URL || window.webkitURL,
+    filesHTMLElement = document.getElementById('filesholder'),
+    windows = navigator.platform.indexOf('Win') !== -1,
+    allowedFiles = {
+      'text/css': {
+        primitivetype: 'css',
+        options: {}
+      },
+      'application/x-javascript': {
+        primitivetype: 'js',
+        options: {
+          jslint: { browser: true, indent: 2 }
+        }
+      },
+      'text/html': {
+        primitivetype: 'html',
+        options: {
+          removeComments: true,
+          removeCommentsFromCDATA: true,
+          removeCDATASectionsFromCDATA: true,
+          collapseWhitespace: true,
+          collapseBooleanAttributes: true,
+          removeAttributeQuotes: true,
+          removeRedundantAttributes: true,
+          useShortDoctype: true,
+          removeEmptyAttributes: true,
+          removeEmptyElements: false,
+          removeOptionalTags: true,
+          removeScriptTypeAttributes: false,
+          removeStyleLinkTypeAttributes: true,
+          lint: false,
+          skipTemplateTags: false,
+          jslint: { browser: true, indent: 2, maxerr: 100 }
+        }
+      }
+    };
+
+  function EventDelegator(el) {
+    var bindings = {},
+      use_capture = true;
+
+    function handleEvent(e) {
+      var events = bindings[e.type],
+        i = 0,
+        target;
+      if (!events) {
+        return;
+      }
+      for (; i < events.length; i += 1) {
+        target = events[i].expression(e.target);
+        if (target) {
+          events[i].handler.call(target, e);
+        }
+      }
+    }
+
+    this.addListener = function (type, expression, handler) {
+      var event = { expression: expression, handler: handler };
+      if (!bindings[type]) {
+        bindings[type] = [event];
+      } else {
+        bindings[type].push(event);
+      }
+      el.addEventListener(type, handleEvent, use_capture);
+    };
+
+    this.removeListener = function (type, handler) {
+      var events = bindings[type],
+        i = 0;
+      if (!events) {
+        return;
+      }
+      for (; i < events.length; i += 1) {
+        if (events[i].handler === handler) {
+          bindings.splice(i, 1);
+          if (bindings.length === 0) {
+            el.removeEventListener(type, handleEvent, use_capture);
+          }
+          break;
+        }
+      }
+    };
+  }
+
+  var events = new EventDelegator(document);
+
+  function FileElement(file) {
+    this.__file = file;
+    this.name = file.name;
+    this.path = (file.webkitRelativePath && file.webkitRelativePath.substr(0, file.webkitRelativePath.indexOf(file.name))) ||'';
+    this.size = file.size;
+    this.mimetype = file.type;
+    this.type = '';
+    this.content = '';
+    this.compressed = '';
+    this.compressed_size = 0;
+    this.base64_compressed = '';
+    this.lintreports = [];
+  }
+
+  FileElement.prototype.compress = function (callback) {
+    var bb = new BlobBuilder(),
+      fileelement = this,
+      url,
+      worker;
+    bb.append(document.getElementById('worker').textContent);
+    url = URL.createObjectURL(bb.getBlob());
+    worker = new Worker(url);
+
+    worker.onmessage = function (e) {
+      var compressed = e.data.compressed || false,
+        lintreport = e.data.lintreport || false,
+        bb = new BlobBuilder(),
+        reader = new FileReader();
+      if (lintreport) {
+        fileelement.lintreports.push(lintreport);
+      }
+      if (compressed) {
+        fileelement.compressed = compressed;
+        fileelement.compressed_size = compressed.length;
+        bb.append(compressed);
+        reader.onloadend = function (e) {
+          fileelement.base64_compressed = e.target.result;
+        };
+        reader.readAsDataURL(bb.getBlob('text/plain'));
+      }
+      URL.revokeObjectURL(url);
+      if (callback) {
+        callback.call(fileelement);
+      }
+    };
+    worker.postMessage({
+      url: base_url,
+      type: fileelement.type,
+      content: fileelement.content,
+      options: allowedFiles[fileelement.mimetype].options
+    });
+  };
+  
+  FileElement.prototype.createHTML = function () {
+    var fragment = document.createDocumentFragment();
+    var li = document.createElement('li');
+    var content = new Option(this.content).innerHTML;
+    li.className = 'file ' + this.type + '-file';
+    li.draggable = true;
+    li.dataset.type = this.type;
+    li.dataset.compressed = this.compressed ? true : false;
+    li.id = this.path + this.name;
+    li.innerHTML = '<div class="right"><a href="#" class="lint">lint</a> - <a href="#" class="delete-file">delete</a></div>' +
+    '<label for="concat-' + this.path + this.name + '"><input type="checkbox" id="concat-' + this.path + this.name + '" class="concatenate">concatenate</label> ' +
+    '<a href="#file-' + this.path + this.name + '" class="opener">' + this.path + this.name + '</a> <span class="info">(size: ' + this.size + ')</span>' +
+    '<div class="clearfix code" id="file-' + this.path + this.name + '"><pre class="sourcecode">' + content + '</pre><pre class="compressedcode">compressing in the background...</pre></div><div class="lintreports"></div>';
+    fragment.appendChild(li);
+    return fragment;
+  };
+
+  function FileStack() {
+    this.mimetypes = {
+      'application/x-javascript': 'js',
+      'text/css': 'css',
+      'text/html': 'html'
+    };
+
+    this.files = {
+      css: {},
+      html: {},
+      js: {}
+    };
+
+    this.readFile = function (file, callback) {
+      var reader = new FileReader(),
+        _self = this;
+      reader.onloadend = function (e) {
+        var type = _self.mimetypes[file.type],
+          fileelement = new FileElement(file);
+        fileelement.type = type;
+        _self.files[type][fileelement.path + file.name] = fileelement;
+        fileelement.content = e.target.result;
+        if (callback) {
+          callback.call(fileelement, file);
+        }
+      };
+      reader.readAsText(file);
+    };
+  }
+
+  var filestack = new FileStack();
+
+  function stopPropagation(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
+  function loadFiles(files, callback) {
+    Array.prototype.forEach.call(files, function (file, i, files) {
+      if (!!filestack.mimetypes[file.type] && file.name.indexOf('.min.') === -1 && file.webkitRelativePath.indexOf('/.git') === -1 && file.webkitRelativePath.indexOf('/.svn') === -1) {
+        filestack.readFile(file, function (file) {
+          filesHTMLElement.appendChild(this.createHTML());
+        });
+      }
+    });
+    Array.prototype.forEach.call(document.getElementsByClassName('notice-drag'), function (element) {
+      element.style.display = 'block';
+    });
+    if (windows) {
+      document.getElementsByClassName('notice-win')[0].style.display = 'block';
+    }
+  }
+
+  function dropFile(e) {
+    stopPropagation(e);
+    this.classList.remove('dropping');
+    loadFiles(e.dataTransfer.files);
+  }
+
+  function dirupload(e) {
+    stopPropagation(e);
+    loadFiles(e.target.files);
+  }
+
+  function deleteFile(e) {
+    stopPropagation(e);
+    filesHTMLElement.removeChild(this.parentNode.parentNode);
+  }
+
+  function keydown(e) {
+    if (e.altKey === true) {
+      window.moveKey = true;
+    }
+  }
+
+  function keyup(e) {
+    window.moveKey = false;
+  }
+
+  function concatenate(e) {
+    stopPropagation(e);
+    var fileElements = document.querySelectorAll('.concatenate-this'),
+      allInOne = {
+        js: {
+          content: '',
+          size: 0,
+          name: 'scripts.concat.min.js',
+          files: []
+        },
+        css: {
+          content: '',
+          size: 0,
+          name: 'styles.concat.min.css',
+          files: []
+        },
+        html: {
+          content: '',
+          size: 0,
+          name: 'html.concat.min.html',
+          files: []
+        }
+      },
+      i = 0,
+      async_files = [],
+      type,
+      file;
+    Array.prototype.forEach.call(fileElements, function (fileElement, i, fileElements) {
+      if (fileElement.id && fileElement.dataset.type) {
+        file = filestack.files[fileElement.dataset.type][fileElement.id];
+        if (file.compressed) {
+          allInOne[file.type].files.push(file);
+          allInOne[file.type].content += file.compressed;
+        } else {
+          async_files.push(file.name);
+          allInOne[file.type].content += '/*placeholder-' + file.name + '-placeholder*/';
+          file.compress(function () {
+            var position = async_files.indexOf(this.name);
+            if (this.compressed) {
+              allInOne[file.type].files.push(file);
+            }
+            if (position !== -1) {
+              async_files.splice(position, 1);
+              if (async_files.length === 0) {
+                Array.prototype.forEach.call(allInOne[this.type].files, function (file) {
+                  allInOne[file.type].content = allInOne[file.type].content.replace(RegExp('\\/\\*placeholder\\-' + file.name +  '\\-placeholder\\*\\/'), file.compressed);
+                });
+                createConcatenatedFiles(allInOne);
+              }
+            }
+          });
+        }
+      }
+      if (async_files.length === 0 && i === fileElements.length - 1) {
+        createConcatenatedFiles(allInOne);
+      }
+    });
+  }
+  
+  function createMinifiedFile(content) {
+    console.log(content);
+  }
+  
+  function createConcatenatedFiles(concatstack) {
+    console.log(concatstack);
+    var type,
+      file;
+    for (type in concatstack) {
+      if (concatstack.hasOwnProperty(type) && concatstack[type].content !== '') {
+        file = new FileElement(concatstack[type]);
+        file.type = type;
+        file.content = concatstack[type].content;
+        file.compressed = true;
+        file.size = file.content.length;
+        console.log(file);
+        filestack.files[file.type][file.name] = file;
+        filesHTMLElement.appendChild(file.createHTML());
+      }
+    }
+  }
+
+  function toggleContent(e) {
+    stopPropagation(e);
+    var id = this.href.substr(this.href.indexOf('#') + 1),
+      state = this.dataset.state,
+      fileelement = this.parentNode;
+    if (fileelement.classList.contains('file') && fileelement.dataset.compressed === 'false') {
+      filestack.files[fileelement.dataset.type][fileelement.id].compress(function () {
+        if (this.compressed) {
+          var compressed = new Option(this.compressed).innerHTML;
+          fileelement.getElementsByClassName('compressedcode')[0].innerHTML = compressed;
+          fileelement.dataset.compressed = true;
+          fileelement.getElementsByClassName('info')[0].innerHTML += ' - compressed: ' + this.compressed_size;
+        }
+      });
+    }
+    if (!state || state === 'closed') {
+      document.getElementById(id).style.display = 'block';
+      this.dataset.state = 'open';
+    } else {
+      document.getElementById(id).style.display = 'none';
+      this.dataset.state = 'closed';
+    }
+  }
+
+  function filedrag(e) {
+    this.style.opacity = '0.5';
+    var datatransfer = e.dataTransfer,
+      re = new RegExp("." + this.dataset.type),
+      new_name = this.id.replace(re, '.min.' + this.dataset.type),
+      file = filestack.files[this.dataset.type][this.id],
+      downloadData = [file.mimetype, new_name, file.base64_compressed];
+    datatransfer.effectAllowed = 'move';
+    if (!windows || window.moveKey === true) {
+      datatransfer.setData('text/html', this.outerHTML);
+      window.dragElement = this;
+    } if (!windows || !window.moveKey) {
+      datatransfer.setData('DownloadURL', downloadData.join(':'));
+    }
+  }
+
+  function concatFile(e) {
+    var file = this.parentNode.parentNode;
+    if (this.checked) {
+      file.classList.add('concatenate-this');
+      //filestack.files[file.dataset.type][file.id].compress(function () {
+      //  file.getElementsByClassName('info')[0].innerHTML += ' - compressed: ' + this.compressed_size;
+      //});
+    } else {
+      file.classList.remove('concatenate-this');
+    }
+  }
+
+  function filedragenter(e) {
+    this.classList.add('over');
+  }
+
+  function filedragleave(e) {
+    this.classList.remove('over');
+  }
+
+  function filedragover(e) {
+    if (e.preventDefault) {
+      e.preventDefault();
+    }
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function filedragend(e) {
+    Array.prototype.forEach.call(document.getElementsByClassName('file'), function (fileEl) {
+      fileEl.classList.remove('over');
+      fileEl.style.opacity = '1';
+    });
+	this.classList.remove('dropping');
+  }
+  
+  function dragenter(e) {
+    e.stopPropagation();
+    this.classList.add('dropping');
+  }
+  
+  function dragleave(e) {
+    e.stopPropagation();
+    this.classList.remove('dropping');
+  }
+
+  function filedrop(e) {
+    if (e.stopPropagation) {
+      e.stopPropagation();
+    }
+    if (window.dragElement !== this) {
+      window.dragElement.outerHTML = this.outerHTML;
+      this.outerHTML = e.dataTransfer.getData('text/html');
+    }
+    filedragend.call(window.dragElement);
+    filedragend.call(this);
+    return false;
+  }
+
+  events.addListener('change', function (target) { return target.id === 'directoryinput' ? target : false; }, dirupload);
+  events.addListener('dragenter', function (target) { return target.nodeName === 'HTML' ? target : false; }, dragenter);
+  events.addListener('dragexit', function (target) { return target.nodeName === 'HTML' ? target : false; }, dragleave);
+  events.addListener('dragleave', function (target) { return target.nodeName === 'HTML' ? target : false; }, dragleave);
+  events.addListener('dragover', function (target) { return target.nodeName === 'HTML' ? target : false; }, stopPropagation);
+  events.addListener('dragend', function (target) { return target.nodeName === 'HTML' ? target : false; }, dragleave);
+  events.addListener('drop', function (target) { return target.nodeName === 'HTML' ? target : false; }, dropFile);
+  events.addListener('keydown', function (target) { return target.nodeName === 'BODY' ? target : false; }, keydown);
+  events.addListener('keyup', function (target) { return target.nodeName === 'BODY' ? target : false; }, keyup);
+  events.addListener('click', function (target) { return target.id === 'concat' ? target : false; }, concatenate);
+  events.addListener('click', function (target) { return target.classList.contains('opener') ? target : !!target.parentNode.classList && target.parentNode.classList.contains('opener') ? target.parentNode : false; }, toggleContent);
+  events.addListener('click', function (target) { return target.classList.contains('delete-file') ? target : false; }, deleteFile);
+  events.addListener('click', function (target) { return target.classList.contains('concatenate') ? target : false; }, concatFile);
+  events.addListener('dragstart', function (target) { return target.classList.contains('file') ? target : false; }, filedrag);
+  events.addListener('dragenter', function (target) { return target.classList.contains('file') ? target : false; }, filedragenter);
+  events.addListener('dragleave', function (target) { return target.classList.contains('file') ? target : false; }, filedragleave);
+  events.addListener('dragover', function (target) { return target.classList.contains('file') ? target : false; }, filedragover);
+  events.addListener('dragend', function (target) { return target.classList.contains('file') ? target : false; }, filedragend);
+  events.addListener('drop', function (target) { return target.classList.contains('file') ? target : false; }, filedrop);
+
+}(this));
+</script>
+</body>
+</html>
